@@ -1,4 +1,4 @@
-RISC-V Emulator in Rust
+# RISC-V Emulator in Rust
 
 ## Disclaimer
 
@@ -17,3 +17,19 @@ the [rvemu book](https://book.rvemu.app/).
 
 - There are also General Purpose ISAs that allow complex systems to run on 
 RISC-V hardware: RV32G and RV64G.
+
+- Here is the list of ISAs that RV64G includes:
+    - RV64I: base integer instructions
+    - RV64M: integer multiplication and division instructions
+    - RV64A: atomic instructions
+    - RV64F: single-precision floating-point instructions
+    - RV64D: double-precision floating-point instructions
+    - RVZicsr: control and status register instructions
+    - RVZifencei: instruction-fetch fence instructions
+
+- As in the book the goal is to run xv6 so we will implement only the instructions
+xv6 uses:
+    - RV64I 
+    - RVZicsr 
+    - a part of RV64M 
+    - a part of RV64A.
