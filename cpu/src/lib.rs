@@ -1,3 +1,5 @@
+pub const DRAM_SIZE: u64 = 1024 * 1024 * 128; // 128KB
+
 struct Cpu {
     regs: [u64; 32],
     pc: u64,
