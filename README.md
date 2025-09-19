@@ -5,6 +5,200 @@
 This purpose of this implementation is an educational only. I used as guideline
 the [rvemu book](https://book.rvemu.app/).
 
+> ## Big Picture: What am I building?
+>
+> **Goal:** Build a **RISC-V emulator** that:
+>
+> * takes a **RISC-V program file** (ELF or flat binary),
+> * loads it into **emulated memory**,
+> * initializes **registers & pc**,
+> * runs a **fetch → decode → execute** loop,
+> * and lets the program run to completion (or trap) as if it were on real hardware.
+>
+> ---
+>
+> ### 0. The “world” around the emulator (who does what?)
+>
+> ```text
+> [Source code: C/Rust/asm]
+>          |
+>          v
+> [Toolchain: compiler + assembler + linker]  <-- uses ISA + ABI rules
+>          |
+>          v
+>    [Program binary: ELF / .bin]
+>          |
+>          v
+> [My RISC-V emulator: loader + CPU + memory]
+> ```
+>
+> * **ISA (Instruction Set Architecture)**
+>
+>   * Defines: instructions, encodings, registers, how each instruction behaves.
+>   * Used by: CPU hardware/emulator, compiler/assembler.
+> * **ABI (Application Binary Interface) + calling convention**
+>
+>   * Defines: how code calls functions, passes args, returns values, uses stack, data layout.
+>   * Used by: compiler, linker, OS.
+>   * **Not “known” by the CPU**; the CPU just follows ISA instruction semantics.
+>
+> ---
+>
+> ### 1. Inside the emulator: components
+>
+> ```text
+>     ┌──────────────────────────┐
+>     │        Emulator          │
+>     │                          │
+>     │  ┌──────────────┐        │
+>     │  │   Loader     │        │
+>     │  └─────┬────────┘        │
+>     │        │ loads program   │
+>     │  ┌─────v────────┐        │
+>     │  │   Memory     │        │
+>     │  └─────┬────────┘        │
+>     │        │ read/write      │
+>     │  ┌─────v────────┐        │
+>     │  │    CPU       │        │
+>     │  │  (regs+pc)   │        │
+>     │  └──────────────┘        │
+>     └──────────────────────────┘
+> ```
+>
+> * **Memory module**
+>
+>   * A big `Vec<u8>` or similar.
+>   * Supports loads/stores: `lb/lh/lw/ld`, `sb/sh/sw/sd`, little-endian.
+> * **CPU module**
+>
+>   * 32 registers: `x0..x31` (RV64I → 64-bit each).
+>
+>     * `x0` always **0**.
+>     * `x2` is **stack pointer** (`sp`) by ABI convention.
+>   * `pc`: program counter.
+>   * `step()` implements **fetch → decode → execute**.
+> * **Loader module**
+>
+>   * Reads the **program binary**.
+>   * Copies code/data into **memory**.
+>   * Sets initial CPU state (e.g. `pc = entry`, `sp = top_of_stack`).
+>
+> ---
+>
+> ### 2. CPU core: fetch → decode → execute
+>
+> ```text
+> loop {
+>   instr = load_u32(memory, pc)
+>   decoded = decode(instr)     # uses ISA tables
+>   execute(decoded, &mut cpu, &mut memory)
+> }
+> ```
+>
+> * **Fetch:**
+>
+>   * Use `pc` as an address into memory.
+>   * Load 4 bytes (RV64I base has 32-bit instructions).
+> * **Decode (ISA):**
+>
+>   * Split fields: `opcode`, `rd`, `rs1`, `rs2`, `funct3`, `funct7`, immediate.
+>   * Use these to figure out: “this is `ADD`, this is `LD`, this is `JALR`, …”.
+> * **Execute:**
+>
+>   * Read source regs (`rs1`, `rs2`).
+>   * Do ALU or memory operation.
+>   * Write result to `rd` (unless `rd == x0`).
+>   * Update `pc` (either `pc+4` or branch/jump target).
+>
+> **Important:** The CPU **does not know** about “functions”, “frames”, or “types”. It only knows: *decode instruction → apply RISC-V spec behavior*.
+>
+> ---
+>
+> ### 3. Where ABI & calling convention actually matter
+>
+> The **ABI + calling convention** are rules for **compiled code**, not for the CPU:
+>
+> * **Type sizes & layout:**
+>
+>   * How big is `int`, `long`, pointer, how structs are laid out, alignment, etc.
+>   * Used by the **compiler** to generate consistent loads/stores and offsets.
+> * **Arguments & returns:**
+>
+>   * Which registers carry the first N arguments?
+>
+>     * e.g. `a0..a7` (`x10..x17`) for RISC-V SysV.
+>   * Which registers hold the result?
+>
+>     * typically `a0`, `a1`.
+> * **Caller-saved vs callee-saved:**
+>
+>   * Caller-saved: caller must save them if it cares.
+>   * Callee-saved: callee must restore them before `ret`.
+> * **Stack rules:**
+>
+>   * `sp` = `x2` is **stack pointer**.
+>   * Stack **grows down** (subtract from `sp` to allocate).
+>   * At function call boundaries, `sp` must be **16-byte aligned**.
+>   * Stack frame layout: where return address, saved regs, locals, spills live.
+>
+> **The CPU doesn’t “know” or enforce these rules.**
+> Compiled code **follows** these rules so that different functions and libraries can call each other safely.
+>
+> ---
+>
+> ### 4. What the emulator must initialize (to let the program “auto-run”)
+>
+> To “press run and let it go”, the emulator must set up the **initial CPU state** in a way that matches ABI / toolchain expectations:
+>
+> * **Load program into memory:**
+>
+>   * Code and data go to known addresses (via your loader).
+> * **Set `pc`:**
+>
+>   * To the program’s **entry point** (e.g. `_start` from ELF).
+> * **Set `sp`:**
+>
+>   * To a **valid stack area** in RAM, usually the **top of memory**.
+>   * Ensure `sp` is **16-byte aligned**.
+>   * Example: `sp = MEM_SIZE & !0xF` (clear low 4 bits).
+> * **Other registers:**
+>
+>   * Typically initialized to 0 (except those you purposely set, like `a0/a1` for `argc/argv`, or `gp` if ABI requires).
+>   * You do **not** “set all 30 registers to their ABI values”; the ABI mainly says how compiled code will **use** them.
+>
+> Once that’s done:
+>
+> ```text
+> while (true) {
+>   cpu.step();   // fetch → decode → execute
+> }
+> ```
+>
+> The program “automatically” runs, because:
+>
+> * The **binary** was built to follow ABI rules (stack, args, returns).
+> * The **CPU** correctly implements the ISA.
+> * The **initial state** (`pc`, `sp`, memory contents) matches what the toolchain expects.
+>
+> ---
+>
+> ### 5. Clean separation of responsibilities
+>
+> * **ISA (RISC-V spec):**
+>
+>   * What each instruction means, how to decode it, semantics, exceptions.
+>   * Implemented by: your **CPU core** (step function) and used by the **compiler**.
+> * **ABI + calling convention:**
+>
+>   * How compiled code uses registers, stack, args, returns, types.
+>   * Implemented by: **compiler, linker, libraries, OS**.
+>   * Your emulator just needs to **initialize registers / memory** in a way that’s consistent with it.
+> * **Emulator (you):**
+>
+>   * Provide: memory, registers, `pc`, instruction semantics (ISA).
+>   * Provide: loader and initial state (`pc`, `sp`, etc.).
+>   * Do **not** need to “understand functions” or “understand structs”; you just execute instructions.
+
 ## RISC-V ISA
 
 - Consists of modules:
