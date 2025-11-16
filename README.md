@@ -33,3 +33,31 @@ xv6 uses:
     - RVZicsr 
     - a part of RV64M 
     - a part of RV64A.
+
+### Install RISC-V Toolchain on MacOS
+
+```bash
+brew install riscv64-elf-gcc riscv64-elf-binutils riscv64-elf-gdb
+```
+
+- if the command above is not working use the following two commands
+
+```bash
+brew tap riscv-software-src/riscv
+brew install riscv-gnu-toolchain
+```
+
+- add the path to .zshrc or .bashrc
+
+```bash
+echo 'export PATH="$(brew --prefix riscv-gnu-toolchain)/bin:$PATH"' >> ~/.zshrc
+source .zshrc
+```
+
+**Verify the installation**
+
+```bash
+riscv64-unknown-elf-gcc --version
+riscv64-unknown-elf-objdump --version
+```
+
