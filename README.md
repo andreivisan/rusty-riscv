@@ -61,3 +61,10 @@ riscv64-unknown-elf-gcc --version
 riscv64-unknown-elf-objdump --version
 ```
 
+## Registers
+
+- There are 32 general-purpose registers that are each 64-bit wide in RV64I.
+- Each register has a role defined by the ***integer register convention***.
+
+![integer register convention](./docs/images/risc-v-register-convention.png)
+
